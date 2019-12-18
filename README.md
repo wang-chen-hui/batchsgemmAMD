@@ -17,3 +17,8 @@ sbtach test.slurm
 ```
 ## result 
 solution
+
+## sgemm_test_by_authorize
+makefile has some problem
+1. we need to use ```LIB_PATH = lib/libcheckresult.so lib/libsgemm_strided_batched.so -lcrypto``` to replace ```LIB_PATH = -L./lib -lcheckresult -lsgemm_strided_batched -lcrypto```
+2. or we also can complie this code by ```hipcc example_sgemm_strided_batched.cpp -I./include lib/libcheckresult.so lib/libsgemm_strided_batched.so -lcrypto -w -o example_sgemm_strided_batched```
