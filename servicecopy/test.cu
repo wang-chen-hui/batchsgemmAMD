@@ -15,6 +15,6 @@ __global__ void GPUFunction()
 int main()
 {
 	CPUFunction();
-	GPUFunction << <10, 120>> > ();
+	GPUFunction <<<10, 120>>>();
 	cudaDeviceSynchronize();
 }

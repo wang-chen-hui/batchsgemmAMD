@@ -1,7 +1,7 @@
 #!/bin/bash	
 
 #SBATCH -J test
-#SBATCH -n 32
+#SBATCH -n 1
 #SBATCH -N 1
 #SBATCH -p caspra
 #SBATCH -o %j
