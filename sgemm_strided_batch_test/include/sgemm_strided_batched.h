@@ -28,7 +28,7 @@ __global__ void ReferenceGemm_kernel(
                            {
                                 int i = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
                                 int j = hipThreadIdx_y + hipBlockIdx_y * hipBlockDim_y;
-                                if (i < N && j < M) 
+                                if (i < M && j < N) 
                                 {
                                 float accumulator = 0;
                                 for (int k = 0; k < K; ++k)
