@@ -1,13 +1,13 @@
 #INC_PATH = -I. -I/opt/rocm/hip/include -I./include
 INC_PATH = -I. -I./include
-LIB_PATH = -L./lib -lcheckresult -lsgemm_strided_batched -lcrypto
+LIB_PATH = lib/libcheckresult.so lib/libsgemm_strided_batched.so -lcrypto
 #LIB_PATH = -L./lib -lcheckresult -lcrypto
-ADD_FLAG = -w -lcudart
+ADD_FLAG = -w -lcudart	
 
 all: example_sgemm_strided_batched.o
 		nvcc $^ ${INC_PATH} ${ADD_FLAG} ${LIB_PATH} -o example_sgemm_strided_batched
 example_sgemm_strided_batched.o: example_sgemm_strided_batched.cu
-		nvcc -c $< ${INC_PATH} ${ADD_FLAG} ${LIB_PATH} -o $@
+		nvcc -c $< ${INC_PATH} ${ADD_FLAG} -o $@
 
 clean:
 		rm -rf *.o
