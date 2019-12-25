@@ -1,0 +1,1 @@
+sbatch test.slurm
