@@ -62,6 +62,26 @@ void sgemm_strided_batched(sgemm_operation trans_a,
         (m + block.x - 1) / block.x,
         (n + block.y - 1) / block.y);
 
+
+    hipStream_t stream[10];
+
+    for(int i = 0; i < 10; i++)
+    {
+
+        hipStreamCreate(&stream[i]);
+    }
+    // hipStreamCreateWithFlags(&stream2, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream3, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream4, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream5, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream6, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream7, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream8, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream9, hipStreamNonBlocking);
+    // hipStreamCreateWithFlags(&stream10, hipStreamNonBlocking);
+
+
+
     /*if (trans_a == operation_none && trans_b == operation_none)
     {
         cout << "NO transpose" << endl;
@@ -73,7 +93,7 @@ void sgemm_strided_batched(sgemm_operation trans_a,
     */
     for (int i = 0; i < batch_count; i++)
     {
-        hipLaunchKernelGGL(ReferenceGemm_kernel, grid, block, 0 , 0 ,
+        hipLaunchKernelGGL(ReferenceGemm_kernel, grid, block, 0 , stream[i],
             m,
             n,
             k,
@@ -89,6 +109,23 @@ void sgemm_strided_batched(sgemm_operation trans_a,
         B += stride_b;
         C += stride_c;
     }
+
+
+    for(int i = 0; i < 10; i++)
+    {
+
+        //hipStreamDestroy(&stream[i]);
+    }
+    // hipStreamDestroy(stream1);
+    // hipStreamDestroy(stream2);
+    // hipStreamDestroy(stream3);
+    // hipStreamDestroy(stream4);
+    // hipStreamDestroy(stream5);
+    // hipStreamDestroy(stream6);
+    // hipStreamDestroy(stream7);
+    // hipStreamDestroy(stream8);
+    // hipStreamDestroy(stream9);
+    // hipStreamDestroy(stream10);
 }
 
 #endif
