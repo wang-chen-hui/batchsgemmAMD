@@ -20,7 +20,7 @@ using namespace std;
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <hip/hip_runtime.h>
+#include <cuda_runtime.h>
 using std::vector;
 
 #include "include/check_result.h"
@@ -28,11 +28,11 @@ using std::vector;
 
 #ifndef CHECK_HIP_ERROR
 #define CHECK_HIP_ERROR(error)                    \
-    if(error != hipSuccess)                       \
+    if(error != cudaSuccess)                       \
     {                                             \
         fprintf(stderr,                           \
                 "Hip error: '%s'(%d) at %s:%d\n", \
-                hipGetErrorString(error),         \
+                cudaGetErrorString(error),         \
                 error,                            \
                 __FILE__,                         \
                 __LINE__);                        \
@@ -475,9 +475,9 @@ int main(int argc, char* argv[])
 	const char* matrix_c = "./data/matrix_c.txt";
  
     //clock
-    hipEvent_t start,end;
-    hipEventCreate(&start);
-	hipEventCreate(&end);    
+    cudaEvent_t start,end;
+    cudaEventCreate(&start);
+	cudaEventCreate(&end);    
 
     if(parse_arguments(argc,
                        argv,
@@ -567,10 +567,10 @@ int main(int argc, char* argv[])
     }
 
 
-    /*std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
+    std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
               << stride_a << ", " << stride_b << ", " << stride_c << ", " << batch_count << ", "
               << alpha << ", " << beta << ", ";
-    */
+
     int size_a = batch_count == 0 ? size_a1 : size_a1 + stride_a * (batch_count - 1);
     int size_b = batch_count == 0 ? size_b1 : size_b1 + stride_b * (batch_count - 1);
     int size_c = batch_count == 0 ? size_c1 : size_c1 + stride_c * (batch_count - 1);
@@ -591,17 +591,17 @@ int main(int argc, char* argv[])
 
     // allocate memory on device
     float *da, *db, *dc;
-    CHECK_HIP_ERROR(hipMalloc(&da, size_a * sizeof(float)));
-    CHECK_HIP_ERROR(hipMalloc(&db, size_b * sizeof(float)));
-    CHECK_HIP_ERROR(hipMalloc(&dc, size_c * sizeof(float)));
+    CHECK_HIP_ERROR(cudaMalloc(&da, size_a * sizeof(float)));
+    CHECK_HIP_ERROR(cudaMalloc(&db, size_b * sizeof(float)));
+    CHECK_HIP_ERROR(cudaMalloc(&dc, size_c * sizeof(float)));
 
     // copy matrices from host to device
-    CHECK_HIP_ERROR(hipMemcpy(da, ha.data(), sizeof(float) * size_a, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(db, hb.data(), sizeof(float) * size_b, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dc, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(cudaMemcpy(da, ha.data(), sizeof(float) * size_a, cudaMemcpyHostToDevice));
+    CHECK_HIP_ERROR(cudaMemcpy(db, hb.data(), sizeof(float) * size_b, cudaMemcpyHostToDevice));
+    CHECK_HIP_ERROR(cudaMemcpy(dc, hc.data(), sizeof(float) * size_c, cudaMemcpyHostToDevice));
 
 	double time=0.0;
-    hipEventRecord(start,0);
+    cudaEventRecord(start,0);
 
     sgemm_strided_batched(trans_a,
                           trans_b,
@@ -621,14 +621,14 @@ int main(int argc, char* argv[])
                           stride_c,
                           batch_count);
 
-	hipEventRecord(end,0);
-	hipEventSynchronize(end);
+	cudaEventRecord(end,0);
+    cudaEventSynchronize(end);
 	float elapsed;
-	hipEventElapsedTime(&elapsed,start,end);
+	cudaEventElapsedTime(&elapsed,start,end);
 	time += elapsed;
 
     // copy output from device to CPU
-    CHECK_HIP_ERROR(hipMemcpy(hc.data(), dc, sizeof(float) * size_c, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(cudaMemcpy(hc.data(), dc, sizeof(float) * size_c, cudaMemcpyDeviceToHost));
     
     bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
 	std::ostringstream out;
@@ -654,8 +654,8 @@ int main(int argc, char* argv[])
 	else
 		std::cout << "Sorry,the result invaild" << std::endl;
 	
-    CHECK_HIP_ERROR(hipFree(da));
-    CHECK_HIP_ERROR(hipFree(db));
-    CHECK_HIP_ERROR(hipFree(dc));
+    CHECK_HIP_ERROR(cudaFree(da));
+    CHECK_HIP_ERROR(cudaFree(db));
+    CHECK_HIP_ERROR(cudaFree(dc));
     return EXIT_SUCCESS;
 }
