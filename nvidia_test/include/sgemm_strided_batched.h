@@ -1,4 +1,5 @@
 
+
 /**/
 #include <iostream>
 #include "cuda.h"
@@ -8,6 +9,7 @@
 #ifndef SGEMM_STRIDED_BATCHED_
 #define SGEMM_STRIDED_BATCHED_
 
+#define BLOCK_SIZE  16
 typedef enum sgemm_operation_
 {
     operation_none = 0,
@@ -28,22 +30,44 @@ __global__ void ReferenceGemm_kernel(
     float *C,
     int ldc)
 {
-
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-    int j = threadIdx.y + blockIdx.y * blockDim.y;
-
-    if (i < M && j < N)
+    int col = threadIdx.x;
+    int row = threadIdx.y;
+    int i = threadIdx.x + blockIdx.x * BLOCK_SIZE;
+    int j = threadIdx.y + blockIdx.y * BLOCK_SIZE;
+    if (i < M && j < N) 
     {
         float accumulator = 0;
-
-        for (int k = 0; k < K; ++k)
+        for (int k = 0; k < K; k +=BLOCK_SIZE)
         {
-            accumulator += A[i + k * lda] * B[k + j * ldb];
+            __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];    
+            __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
+    	    As[row][col] = A[i + (k + row) * lda];
+	     	Bs[col][row] = B[k + col + j * ldb];
+            __syncthreads();
+            for (int e = 0; e < BLOCK_SIZE; ++e)
+            accumulator += As[e][col] * Bs[e][row];
+            __syncthreads(); 
         }
-
         C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
     }
+
 }
+
+    // int i = threadIdx.x + blockIdx.x * blockDim.x;
+    // int j = threadIdx.y + blockIdx.y * blockDim.y;
+
+    // if (i < M && j < N)
+    // {
+    //     float accumulator = 0;
+
+    //     for (int k = 0; k < K; ++k)
+    //     {
+    //         accumulator += A[i + k * lda] * B[k + j * ldb];
+    //     }
+
+    //     C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
+    // }
+    //}
 
 void sgemm_strided_batched(sgemm_operation trans_a,
                            sgemm_operation trans_b,
