@@ -6,4 +6,4 @@
 #SBATCH -p caspra
 #SBATCH -o %j.log
 #SBATCH -e %j.err
-./example_sgemm_strided_batched -m 512 -n 512 -k 256 --batch_count 10
+./example_sgemm_strided_batched -m 1024 -n 512 -k 256 --batch_count 10

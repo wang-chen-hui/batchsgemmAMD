@@ -599,9 +599,9 @@ int main(int argc, char* argv[])
     CHECK_HIP_ERROR(hipMemcpy(da, ha.data(), sizeof(float) * size_a, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(db, hb.data(), sizeof(float) * size_b, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dc, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
-    printMatrix("A",ha,m,k,lda);
-    printMatrix("B",hb,k,n,ldb);
-    printMatrix("C",hc,m,n,ldc);
+    //printMatrix("A",ha,m,k,lda);
+    //printMatrix("B",hb,k,n,ldb);
+    //printMatrix("C",hc,m,n,ldc);
 	double time=0.0;
     hipEventRecord(start,0);
 
@@ -631,7 +631,7 @@ int main(int argc, char* argv[])
 
     // copy output from device to CPU
     CHECK_HIP_ERROR(hipMemcpy(hc.data(), dc, sizeof(float) * size_c, hipMemcpyDeviceToHost));
-    printMatrix("resC",hc,m,n,ldc);
+    //printMatrix("resC",hc,m,n,ldc);
     bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
 	std::ostringstream out;
 	if ( result == 1 )
