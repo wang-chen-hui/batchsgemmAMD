@@ -1,5 +1,5 @@
 INC_PATH = -I. -I/opt/rocm/hip/include -I./include
-LIB_PATH = lib/libcheckresult.so lib/libsgemm_strided_batched.so -lcrypto
+LIB_PATH = ./lib/libcheckresult.so -lcrypto
 ADD_FLAG = -w
 
 all: example_sgemm_strided_batched.o

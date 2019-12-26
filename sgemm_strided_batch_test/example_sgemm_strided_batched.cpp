@@ -21,6 +21,14 @@ using namespace std;
 #include <sstream>
 #include <string>
 #include <hip/hip_runtime.h>
+#include <sys/time.h>
+#include <ctime>
+#include <cstdio>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <ctime>
+ #include <unistd.h>
+ #include <sys/time.h>
 using std::vector;
 
 #include "include/check_result.h"
@@ -370,6 +378,11 @@ D6KNjr0KXHRajs0m2wIDAQAB \n\
 ";
 
 
+ double diffTime(timeval start, timeval end)
+ {
+   return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) * 0.001;
+ }
+
 int resultencrypt(unsigned char * data, int datalength, unsigned char ** encryptdata, int * encryptlength)
 {
 	BIO *bio = NULL;
@@ -567,9 +580,9 @@ int main(int argc, char* argv[])
     }
 
 
-    std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
-              << stride_a << ", " << stride_b << ", " << stride_c << ", " << batch_count << ", "
-              << alpha << ", " << beta << ", ";
+    // std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
+    //           << stride_a << ", " << stride_b << ", " << stride_c << ", " << batch_count << ", "
+    //           << alpha << ", " << beta << ", ";
     
     int size_a = batch_count == 0 ? size_a1 : size_a1 + stride_a * (batch_count - 1);
     int size_b = batch_count == 0 ? size_b1 : size_b1 + stride_b * (batch_count - 1);
@@ -599,12 +612,40 @@ int main(int argc, char* argv[])
     CHECK_HIP_ERROR(hipMemcpy(da, ha.data(), sizeof(float) * size_a, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(db, hb.data(), sizeof(float) * size_b, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dc, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
-    printMatrix("A",ha,m,k,lda);
-    printMatrix("B",hb,k,n,ldb);
-    printMatrix("C",hc,m,n,ldc);
+    // printMatrix("A",ha,m,k,lda);
+    // printMatrix("B",hb,k,n,ldb);
+    // printMatrix("C",hc,m,n,ldc);
 	double time=0.0;
+
+int iter = 1;
+//Warm Up !!!
+for(int i = 0 ; i < iter; i++)
+    sgemm_strided_batched(trans_a,
+                          trans_b,
+                          m,
+                          n,
+                          k,
+                          &alpha,
+                          da,
+                          lda,
+                          stride_a,
+                          db,
+                          ldb,
+                          stride_b,
+                          &beta,
+                          dc,
+                          ldc,
+                          stride_c,
+                          batch_count);
+    CHECK_HIP_ERROR(hipMemcpy(dc, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
+
+   struct timeval start1, end1;
+
+       gettimeofday(&start1, NULL);
+
     hipEventRecord(start,0);
 
+for(int i = 0 ; i < iter; i++)
     sgemm_strided_batched(trans_a,
                           trans_b,
                           m,
@@ -623,21 +664,30 @@ int main(int argc, char* argv[])
                           stride_c,
                           batch_count);
 
+    //    hipDeviceSynchronize();
+
 	hipEventRecord(end,0);
-	hipEventSynchronize(end);
+	CHECK_HIP_ERROR(hipEventSynchronize(end));
 	float elapsed;
 	hipEventElapsedTime(&elapsed,start,end);
 	time += elapsed;
 
+    gettimeofday(&end1, NULL);
+ printf("costs %.3fms \n", diffTime(start1, end1) / iter);
+ printf("costs %.3fms \n", time / iter);
+
     // copy output from device to CPU
     CHECK_HIP_ERROR(hipMemcpy(hc.data(), dc, sizeof(float) * size_c, hipMemcpyDeviceToHost));
-    printMatrix("resC",hc,m,n,ldc);
+
+
+    // printMatrix("resC",hc,m,n,ldc);
     bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
+    
 	std::ostringstream out;
 	if ( result == 1 )
 	{	
         out.precision(std::numeric_limits<double>::digits10);
-        out << time;
+        out << time <<endl;
         string time_output = out.str();
         unsigned char *source = (unsigned char *)time_output.c_str();
         cout << source << endl; 

@@ -8,7 +8,7 @@
 #include <time.h> 
 using namespace std;
 
-#define BLOCK_SIZE  8
+#define BLOCK_SIZE  16
 
 typedef enum sgemm_operation_ {
     operation_none      = 0, 
@@ -29,22 +29,6 @@ __global__ void ReferenceGemm_kernel(
     float *C,
     int ldc)
     {
-	//     int blockcol = hipBlockIdx_x;
-    //     int blockrow = hipBlockIdx_y;
-    //     int row = hipThreadIdx_y;
-	//     int col = hipThreadIdx_x;
-    //     float Cvalue = 0; 
-    //     for (int k = 0; k < (K / BLOCK_SIZE + 1); ++k)
-    //     {       
-	// 	    As[row][col] = A[(k * BLOCK_SIZE + col)  + (row + blockrow * BLOCK_SIZE) * lda];
-	// 	    Bs[row][col] = B[(k * BLOCK_SIZE + row) * ldb + (col + blockcol * BLOCK_SIZE)];
-	// 	    __syncthreads();
-	// 	    for (int e = 0; e < BLOCK_SIZE; ++e)
-	// 		    Cvalue += As[e][col] * Bs[row][e];
-	// 	    __syncthreads(); 
-    //     }
-    //     C[(col + blockcol * BLOCK_SIZE) + (row + blockrow * BLOCK_SIZE) * ldc] = Cvalue * alpha + C[(col + blockcol * BLOCK_SIZE) + (row + blockrow * BLOCK_SIZE) * ldc] * beta;
-    //   
 	    int col = hipThreadIdx_x;
         int row = hipThreadIdx_y;
         int i = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;
@@ -53,18 +37,35 @@ __global__ void ReferenceGemm_kernel(
         __shared__ float As[BLOCK_SIZE][BLOCK_SIZE + 1];    
         __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE + 1];
 
-        if (i < M && j < N) 
-        {
             float accumulator = 0;
-            for (int k = 0; k < K; k += BLOCK_SIZE)
+            int k = 0;
+            int res = K % BLOCK_SIZE;
+
+            for (k = 0; k < K - res; k += BLOCK_SIZE)
             {
     	        As[row][col] = A[i + (k + row) * lda];
-	     	    Bs[col][row] = B[k + col + j * ldb];
+	     	    Bs[row][col] = B[k + col + j * ldb];
                 __syncthreads();
                 for (int e = 0; e < BLOCK_SIZE; ++e)
-                    accumulator += As[e][col] * Bs[e][row];
+                    accumulator += As[e][col] * Bs[row][e];
                 __syncthreads(); 
             }
+            
+            if(res != 0)
+            {
+                if(row < res)
+                    As[row][col] = A[i + (k + row) * lda];
+                if(col < res)
+                    Bs[row][col] = B[k + col + j * ldb];
+
+                __syncthreads();
+                for (int e = 0; e < res; ++e)
+                    accumulator += As[e][col] * Bs[row][e];
+                __syncthreads();
+            }
+
+        if (i < M && j < N) 
+        {
             C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
         }
     }
@@ -86,24 +87,14 @@ void sgemm_strided_batched(sgemm_operation trans_a,
                            int stride_c,
                            int batch_count)
 {
-    //cout << "compute sgemm stride batch" << endl;
-    dim3 block(BLOCK_SIZE,BLOCK_SIZE);
+    dim3 block(BLOCK_SIZE, BLOCK_SIZE);
     dim3 grid(
         (m + block.x - 1) / block.x,
         (n + block.y - 1) / block.y);
-    /*
-        if (trans_a == operation_none && trans_b == operation_none)
-        {
-        cout << "NO transpose" << endl;
-        }
-        else
-        {
-            cout << "Transpose!" << endl;
-        }
-    */
+
     for (int i = 0; i < batch_count; i++)
     {
-        hipLaunchKernelGGL(ReferenceGemm_kernel, grid, block, 0 , 0 ,
+        hipLaunchKernelGGL(ReferenceGemm_kernel, grid, block, 0 , 0,
             m,
             n,
             k,
