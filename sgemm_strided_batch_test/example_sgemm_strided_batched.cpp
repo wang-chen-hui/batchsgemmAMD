@@ -612,9 +612,15 @@ int main(int argc, char* argv[])
     CHECK_HIP_ERROR(hipMemcpy(da, ha.data(), sizeof(float) * size_a, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(db, hb.data(), sizeof(float) * size_b, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dc, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
+<<<<<<< HEAD
     // printMatrix("A",ha,m,k,lda);
     // printMatrix("B",hb,k,n,ldb);
     // printMatrix("C",hc,m,n,ldc);
+=======
+    //printMatrix("A",ha,m,k,lda);
+    //printMatrix("B",hb,k,n,ldb);
+    //printMatrix("C",hc,m,n,ldc);
+>>>>>>> bca2b99d49c529a2d391f631b3f92cd0b59e6a7a
 	double time=0.0;
 
 int iter = 1;
@@ -678,9 +684,13 @@ for(int i = 0 ; i < iter; i++)
 
     // copy output from device to CPU
     CHECK_HIP_ERROR(hipMemcpy(hc.data(), dc, sizeof(float) * size_c, hipMemcpyDeviceToHost));
+<<<<<<< HEAD
 
 
     // printMatrix("resC",hc,m,n,ldc);
+=======
+    //printMatrix("resC",hc,m,n,ldc);
+>>>>>>> bca2b99d49c529a2d391f631b3f92cd0b59e6a7a
     bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
     
 	std::ostringstream out;
