@@ -3,16 +3,17 @@
 #ifndef SGEMM_STRIDED_BATCHED_
 #define SGEMM_STRIDED_BATCHED_
 
-#include<iostream>
+#include <iostream>
 #include "hip/hip_runtime.h"
-#include <time.h> 
+#include <time.h>
 using namespace std;
 
-#define BLOCK_SIZE  16
+#define BLOCK_SIZE 16
 
-typedef enum sgemm_operation_ {
-    operation_none      = 0, 
-    operation_transpose  = 1,
+typedef enum sgemm_operation_
+{
+    operation_none = 0,
+    operation_transpose = 1,
     operation_conjugate_transpose = 2
 } sgemm_operation;
 
@@ -28,100 +29,126 @@ __global__ void ReferenceGemm_kernel(
     float beta,
     float *C,
     int ldc)
+{
+    int col = hipThreadIdx_x;
+    int row = hipThreadIdx_y;
+    int i = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;
+    int j = hipThreadIdx_y + hipBlockIdx_y * BLOCK_SIZE;
+    __shared__ float As[BLOCK_SIZE][BLOCK_SIZE + 1];
+    __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE + 1];
+
+    float accumulator = 0;
+    int k = 0;
+    int res = K % BLOCK_SIZE;
+
+    for (k = 0; k < K - res; k += BLOCK_SIZE)
     {
-	    int col = hipThreadIdx_x;
-        int row = hipThreadIdx_y;
 
-        int i = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;
+        As[row][col] = A[i + (k + row) * lda];
+        Bs[row][col] = B[k + col + j * ldb];
+        __syncthreads();
 
-        int j = hipThreadIdx_y + hipBlockIdx_y * BLOCK_SIZE;
-
-
-
-        __shared__ float As[BLOCK_SIZE][BLOCK_SIZE + 1];    
-
-        __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE + 1];
-
-            float accumulator = 0;
-            int k = 0;
-            int res = K % BLOCK_SIZE;
-
-            for (k = 0; k < K - res; k += BLOCK_SIZE)
-            {
-
-    	        As[row][col] = A[i + (k + row) * lda];
-	     	    Bs[row][col] = B[k + col + j * ldb];
-                __syncthreads();
-
-                for (int e = 0; e < BLOCK_SIZE; ++e)
-                    accumulator += As[e][col] * Bs[row][e];
-                __syncthreads(); 
-
-            }
-            
-            if(res != 0)
-            {
-                if(row < res)
-                    As[row][col] = A[i + (k + row) * lda];
-                if(col < res)
-                    Bs[row][col] = B[k + col + j * ldb];
-
-                __syncthreads();
-                for (int e = 0; e < res; ++e)
-                    accumulator += As[e][col] * Bs[row][e];
-                __syncthreads();
-            }
-
-        if (i < M && j < N) 
-        {
-            C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
-
-        }
-
+        for (int e = 0; e < BLOCK_SIZE; ++e)
+            accumulator += As[e][col] * Bs[row][e];
+        __syncthreads();
     }
-        // int blockrow = hipBlockIdx_y;
-	    // int blockcol = hipBlockIdx_x;
-        // int row = hipThreadIdx_y;
-	    // int col = hipThreadIdx_x;
-        // float Cvalue = 0; 
-        // for (int k = 0; k < (K / BLOCK_SIZE); ++k)
-        // {       
-        //     __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];    
-        //     __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
-		//     As[row][col] = A[(blockcol * BLOCK_SIZE + col)  + (row + k * BLOCK_SIZE) * lda];
-		//     Bs[col][row] = B[(blockrow * BLOCK_SIZE + row) * ldb + (col + k * BLOCK_SIZE)];
-		//     __syncthreads();
-		//     for (int e = 0; e < BLOCK_SIZE; ++e)
-		// 	    Cvalue += As[e][col] * Bs[e][row];
-		//     __syncthreads(); 
-        // }
-        // C[(col + blockcol * BLOCK_SIZE) + (row + blockrow * BLOCK_SIZE) * ldc] = Cvalue * alpha + C[(col + blockcol * BLOCK_SIZE) + (row + blockrow * BLOCK_SIZE) * ldc] * beta;
-    //     int i = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
-    //     int j = hipThreadIdx_y + hipBlockIdx_y * hipBlockDim_y;
-    //     if (i < M && j < N) 
-    //     {
-    //         float accumulator = 0;
-    //         for (int k = 0; k < K; ++k)
-    //         {
-    //             accumulator += A[i + k * lda ] * B[k + j * ldb];
-    //         }
-    //         C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
-    //     } 
-    // }
+
+    if (res != 0)
+    {
+        if (row < res)
+            As[row][col] = A[i + (k + row) * lda];
+        if (col < res)
+            Bs[row][col] = B[k + col + j * ldb];
+
+        __syncthreads();
+        for (int e = 0; e < res; ++e)
+            accumulator += As[e][col] * Bs[row][e];
+        __syncthreads();
+    }
+
+    if (i < M && j < N)
+    {
+        C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
+    }
+}
+
+__global__ void ReferenceGemm_kernel(
+    int M,
+    int N,
+    int K,
+    float alpha,
+    const float *A,
+    int lda,
+    int stride_a,
+    const float *B,
+    int ldb,
+    int stride_b,
+    float beta,
+    float *C,
+    int ldc,
+    int stride_c)
+{
+    int batch_id = hipBlockIdx_z;
+    A += stride_a * batch_id;
+    B += stride_b * batch_id;
+    C += stride_c * batch_id;
+
+    int col = hipThreadIdx_x;
+    int row = hipThreadIdx_y;
+    int i = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;
+    int j = hipThreadIdx_y + hipBlockIdx_y * BLOCK_SIZE;
+    __shared__ float As[BLOCK_SIZE][BLOCK_SIZE + 1];
+    __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE + 1];
+
+    float accumulator = 0;
+    int k = 0;
+    int res = K % BLOCK_SIZE;
+
+    for (k = 0; k < K - res; k += BLOCK_SIZE)
+    {
+
+        As[row][col] = A[i + (k + row) * lda];
+        Bs[row][col] = B[k + col + j * ldb];
+        __syncthreads();
+
+        for (int e = 0; e < BLOCK_SIZE; ++e)
+            accumulator += As[e][col] * Bs[row][e];
+        __syncthreads();
+    }
+
+    if (res != 0)
+    {
+        if (row < res)
+            As[row][col] = A[i + (k + row) * lda];
+        if (col < res)
+            Bs[row][col] = B[k + col + j * ldb];
+
+        __syncthreads();
+        for (int e = 0; e < res; ++e)
+            accumulator += As[e][col] * Bs[row][e];
+        __syncthreads();
+    }
+
+    if (i < M && j < N)
+    {
+        C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
+    }
+}
+
 void sgemm_strided_batched(sgemm_operation trans_a,
                            sgemm_operation trans_b,
                            int m,
                            int n,
                            int k,
-                           const float* alpha,
-                           const float* A,
+                           const float *alpha,
+                           const float *A,
                            int lda,
                            int stride_a,
-                           const float* B,
+                           const float *B,
                            int ldb,
                            int stride_b,
-                           const float* beta,
-                           float* C,
+                           const float *beta,
+                           float *C,
                            int ldc,
                            int stride_c,
                            int batch_count)
@@ -129,25 +156,23 @@ void sgemm_strided_batched(sgemm_operation trans_a,
     dim3 block(BLOCK_SIZE, BLOCK_SIZE);
     dim3 grid(
         (m + block.x - 1) / block.x,
-        (n + block.y - 1) / block.y);
+        (n + block.y - 1) / block.y,
+        batch_count);
 
-    for (int i = 0; i < batch_count; i++)
-    {
-        hipLaunchKernelGGL(ReferenceGemm_kernel, grid, block, 0 , 0,
-            m,
-            n,
-            k,
-            *alpha,
-            A,
-            lda,
-            B,
-            ldb,
-            *beta,
-            C,
-            ldc);
-        A += stride_a;
-        B += stride_b;
-        C += stride_c;
-    }
+    hipLaunchKernelGGL(ReferenceGemm_kernel, grid, block, 0, 0,
+                            m,
+                            n,
+                            k,
+                            *alpha,
+                            A,
+                            lda,
+                            stride_a,
+                            B,
+                            ldb,
+                            stride_b,
+                            *beta,
+                            C,
+                            ldc,                               
+                            stride_c);
 }
 #endif
