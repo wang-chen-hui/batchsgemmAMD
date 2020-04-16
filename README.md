@@ -24,3 +24,11 @@ solution
 
 ## Currently
 this projiect only has hip code
+
+## SgemmStridedBatched
+1. 此函数执行一批矩阵的矩阵矩阵乘法。批处理被认为是“统一的”，即所有实例的A，B和C矩阵都具有相同的尺寸（m，n，k），前导尺寸（lda，ldb，ldc）和换位（transa，transb） 。批次的每个实例的输入矩阵A，B和输出矩阵C与前一个实例的位置位于固定的地址偏移处。用户将第一个实例的A，B和C矩阵的指针与确定未来实例中输入和输出矩阵位置的地址偏移量strideA，strideB和strideC一起传递给函数。
+2. 该函数的优化本质是矩阵乘法的优化。
+3. 优化思想：
+  + share memory
+  + stream
+  + Hierarchical Structure(硬件映射)(参考cutlass)
