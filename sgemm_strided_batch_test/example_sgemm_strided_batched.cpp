@@ -21,14 +21,6 @@ using namespace std;
 #include <sstream>
 #include <string>
 #include <hip/hip_runtime.h>
-#include <sys/time.h>
-#include <ctime>
-#include <cstdio>
- #include <cstdio>
- #include <cstdlib>
- #include <ctime>
- #include <unistd.h>
- #include <sys/time.h>
 using std::vector;
 
 #include "include/check_result.h"
@@ -57,7 +49,8 @@ using std::vector;
 #define ALPHA 2
 #define BETA 3
 
-void printMatrix(const char* name, vector<float> A, int m, int n, int lda)
+
+void printMatrix(const char* name, float* A, int m, int n, int lda)
 {
     printf("---------- %s ----------\n", name);
     int max_size = 15;
@@ -378,11 +371,6 @@ D6KNjr0KXHRajs0m2wIDAQAB \n\
 ";
 
 
- double diffTime(timeval start, timeval end)
- {
-   return (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) * 0.001;
- }
-
 int resultencrypt(unsigned char * data, int datalength, unsigned char ** encryptdata, int * encryptlength)
 {
 	BIO *bio = NULL;
@@ -471,7 +459,7 @@ int main(int argc, char* argv[])
 
     // invalid int and float for rocblas_sgemm_strided_batched int and float arguments
     int invalid_int = std::numeric_limits<int>::min() + 1;
-    float invalid_float = std::numeric_limits<float>::quiet_NaN();
+    float invalid_float     = std::numeric_limits<float>::quiet_NaN();
 
     // initialize to invalid value to detect if values not specified on command line
     int m = invalid_int, lda = invalid_int, stride_a = invalid_int;
@@ -490,7 +478,7 @@ int main(int argc, char* argv[])
     //clock
     hipEvent_t start,end;
     hipEventCreate(&start);
-	hipEventCreate(&end);    
+    hipEventCreate(&end);    
 
     if(parse_arguments(argc,
                        argv,
@@ -550,7 +538,7 @@ int main(int argc, char* argv[])
     int a_stride_1, a_stride_2, b_stride_1, b_stride_2;
     int size_a1, size_b1, size_c1 = ldc * n;
 
-	if(trans_a == operation_none)
+    if(trans_a == operation_none)
     {
         //std::cout << "N";
         a_stride_1 = 1;
@@ -579,11 +567,11 @@ int main(int argc, char* argv[])
         size_b1    = ldb * k;
     }
 
-
-    // std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
-    //           << stride_a << ", " << stride_b << ", " << stride_c << ", " << batch_count << ", "
-    //           << alpha << ", " << beta << ", ";
-    
+/*
+    std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
+              << stride_a << ", " << stride_b << ", " << stride_c << ", " << batch_count << ", "
+              << alpha << ", " << beta << ", ";
+*/
     int size_a = batch_count == 0 ? size_a1 : size_a1 + stride_a * (batch_count - 1);
     int size_b = batch_count == 0 ? size_b1 : size_b1 + stride_b * (batch_count - 1);
     int size_c = batch_count == 0 ? size_c1 : size_c1 + stride_c * (batch_count - 1);
@@ -595,10 +583,10 @@ int main(int argc, char* argv[])
     vector<float> hc_gold(size_c);
 
     // read data on host
-	matrix_read(ha,size_a/size_a1,matrix_a);
+	/*matrix_read(ha,size_a/size_a1,matrix_a);
 	matrix_read(hb,size_b/size_b1,matrix_b);
 	matrix_read(hc,size_c/size_c1,matrix_c);
-	matrix_read(hc_gold,size_c/size_c1,matrix_c);
+	matrix_read(hc_gold,size_c/size_c1,matrix_c);*/
     //initial data on host
     initialize_a_b_c(ha, size_a, hb, size_b, hc, hc_gold, size_c);	
 
@@ -612,14 +600,13 @@ int main(int argc, char* argv[])
     CHECK_HIP_ERROR(hipMemcpy(da, ha.data(), sizeof(float) * size_a, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(db, hb.data(), sizeof(float) * size_b, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dc, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
-    // printMatrix("A",ha,m,k,lda);
-    // printMatrix("B",hb,k,n,ldb);
-    // printMatrix("C",hc,m,n,ldc);
-	double time=0.0;
-
-int iter = 1;
-//Warm Up !!!
-for(int i = 0 ; i < iter; i++)
+    
+    //time 
+    float *d_time;
+    CHECK_HIP_ERROR(hipMalloc(&d_time, size_c * sizeof(float)));
+    CHECK_HIP_ERROR(hipMemcpy(d_time, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
+    
+    //warmup && varify results
     sgemm_strided_batched(trans_a,
                           trans_b,
                           m,
@@ -637,57 +624,46 @@ for(int i = 0 ; i < iter; i++)
                           ldc,
                           stride_c,
                           batch_count);
-    CHECK_HIP_ERROR(hipMemcpy(dc, hc.data(), sizeof(float) * size_c, hipMemcpyHostToDevice));
 
-   struct timeval start1, end1;
-
-       gettimeofday(&start1, NULL);
-
+    double time=0.0;
     hipEventRecord(start,0);
+    for(int s1 = 0; s1 < 10; ++s1)
+    {
+        sgemm_strided_batched(trans_a,
+                              trans_b,
+                              m,
+                              n,
+                              k,
+                              &alpha,
+                              da,
+                              lda,
+                              stride_a,
+                              db,
+                              ldb,
+                              stride_b,
+                              &beta,
+                              d_time,
+                              ldc,
+                              stride_c,
+                              batch_count);
+    }
 
-for(int i = 0 ; i < iter; i++)
-    sgemm_strided_batched(trans_a,
-                          trans_b,
-                          m,
-                          n,
-                          k,
-                          &alpha,
-                          da,
-                          lda,
-                          stride_a,
-                          db,
-                          ldb,
-                          stride_b,
-                          &beta,
-                          dc,
-                          ldc,
-                          stride_c,
-                          batch_count);
-
-    //    hipDeviceSynchronize();
-
-	hipEventRecord(end,0);
-	CHECK_HIP_ERROR(hipEventSynchronize(end));
-	float elapsed;
-	hipEventElapsedTime(&elapsed,start,end);
-	time += elapsed;
-
-    gettimeofday(&end1, NULL);
- printf("costs %.3fms \n", diffTime(start1, end1) / iter);
- printf("costs %.3fms \n", time / iter);
+    hipEventRecord(end,0);
+    hipEventSynchronize(end);
+    float elapsed;
+    hipEventElapsedTime(&elapsed,start,end);
+    time += elapsed;
+    time = time / 10;
 
     // copy output from device to CPU
     CHECK_HIP_ERROR(hipMemcpy(hc.data(), dc, sizeof(float) * size_c, hipMemcpyDeviceToHost));
-
-
-    // printMatrix("resC",hc,m,n,ldc);
-    bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
     
-	std::ostringstream out;
-	if ( result == 1 )
-	{	
+    bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
+    std::ostringstream out;
+    if ( result == 1 )
+    {	
         out.precision(std::numeric_limits<double>::digits10);
-        out << time <<endl;
+        out << time;
         string time_output = out.str();
         unsigned char *source = (unsigned char *)time_output.c_str();
         cout << source << endl; 
@@ -702,12 +678,13 @@ for(int i = 0 ; i < iter; i++)
         chartohexstring = CharStr2HexStr(encryptMsg, encryptlength);
         cout << "The result is  " << "\n" << chartohexstring << endl;
 		
-	}
-	else
-		std::cout << "Sorry,the result invaild" << std::endl;
+    }
+    else
+        std::cout << "Sorry,the result invaild" << std::endl;
 	
     CHECK_HIP_ERROR(hipFree(da));
     CHECK_HIP_ERROR(hipFree(db));
     CHECK_HIP_ERROR(hipFree(dc));
+    CHECK_HIP_ERROR(hipFree(d_time));
     return EXIT_SUCCESS;
 }

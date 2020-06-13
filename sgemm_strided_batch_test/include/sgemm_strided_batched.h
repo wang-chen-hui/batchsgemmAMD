@@ -36,7 +36,6 @@ __global__ void ReferenceGemm_kernel(
     int j = hipThreadIdx_y + hipBlockIdx_y * BLOCK_SIZE;
     __shared__ float As[BLOCK_SIZE][BLOCK_SIZE + 1];
     __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE + 1];
-
     float accumulator = 0;
     int k = 0;
     int res = K % BLOCK_SIZE;
@@ -49,8 +48,8 @@ __global__ void ReferenceGemm_kernel(
         __syncthreads();
 
         for (int e = 0; e < BLOCK_SIZE; ++e)
-            accumulator += As[e][col] * Bs[row][e];
-        __syncthreads();
+            accumulator += As[e][col] * Bs[row][e];   
+	__syncthreads();
     }
 
     if (res != 0)
@@ -59,7 +58,6 @@ __global__ void ReferenceGemm_kernel(
             As[row][col] = A[i + (k + row) * lda];
         if (col < res)
             Bs[row][col] = B[k + col + j * ldb];
-
         __syncthreads();
         for (int e = 0; e < res; ++e)
             accumulator += As[e][col] * Bs[row][e];
@@ -68,7 +66,7 @@ __global__ void ReferenceGemm_kernel(
 
     if (i < M && j < N)
     {
-        C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
+      C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
     }
 }
 
@@ -99,7 +97,6 @@ __global__ void ReferenceGemm_kernel(
     int j = hipThreadIdx_y + hipBlockIdx_y * BLOCK_SIZE;
     __shared__ float As[BLOCK_SIZE][BLOCK_SIZE + 1];
     __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE + 1];
-
     float accumulator = 0;
     int k = 0;
     int res = K % BLOCK_SIZE;
@@ -112,7 +109,7 @@ __global__ void ReferenceGemm_kernel(
         __syncthreads();
 
         for (int e = 0; e < BLOCK_SIZE; ++e)
-            accumulator += As[e][col] * Bs[row][e];
+	    accumulator += As[e][col] * Bs[row][e];
         __syncthreads();
     }
 
@@ -122,16 +119,15 @@ __global__ void ReferenceGemm_kernel(
             As[row][col] = A[i + (k + row) * lda];
         if (col < res)
             Bs[row][col] = B[k + col + j * ldb];
-
         __syncthreads();
         for (int e = 0; e < res; ++e)
-            accumulator += As[e][col] * Bs[row][e];
+	    accumulator += As[e][col] * Bs[row][e];
         __syncthreads();
     }
 
     if (i < M && j < N)
     {
-        C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
+      C[i + j * ldc] = alpha * accumulator + beta * C[i + j * ldc];
     }
 }
 
