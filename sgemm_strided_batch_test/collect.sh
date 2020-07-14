@@ -17,3 +17,4 @@ lsscsi -s
 module list
 nvidia-smi
 (lshw -short -quiet -sanitize || lspci) | cat
+lspci | grep -i VGA

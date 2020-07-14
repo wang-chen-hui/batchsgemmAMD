@@ -21,6 +21,7 @@ using namespace std;
 #include <sstream>
 #include <string>
 #include <hip/hip_runtime.h>
+#include <hip/hip_profile.h>
 using std::vector;
 
 #include "include/check_result.h"
@@ -624,7 +625,7 @@ int main(int argc, char* argv[])
                           ldc,
                           stride_c,
                           batch_count);
-
+HIP_BEGIN_MARKER("Setup", "MyAppGroup");
     double time=0.0;
     hipEventRecord(start,0);
     for(int s1 = 0; s1 < 10; ++s1)
@@ -654,7 +655,7 @@ int main(int argc, char* argv[])
     hipEventElapsedTime(&elapsed,start,end);
     time += elapsed;
     time = time / 10;
-
+HIP_END_MARKER();
     // copy output from device to CPU
     CHECK_HIP_ERROR(hipMemcpy(hc.data(), dc, sizeof(float) * size_c, hipMemcpyDeviceToHost));
     
