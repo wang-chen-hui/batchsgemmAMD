@@ -69,7 +69,7 @@ __global__ void ReferenceGemm_kernel(
 
     // shared memory
 
-    __shared__ float As[BLOCK_SIZE_M][BLOCK_SIZE_K+4]; // avoid bank conflict
+    __shared__ float As[BLOCK_SIZE_M][BLOCK_SIZE_K]; // avoid bank conflict
     __shared__ float Bs[BLOCK_SIZE_K][BLOCK_SIZE_N];
     
     // registers for C
