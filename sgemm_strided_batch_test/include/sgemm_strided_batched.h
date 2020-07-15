@@ -8,7 +8,7 @@
 #include <time.h>
 using namespace std;
 
-#define BLOCK_SIZE_M 64
+#define BLOCK_SIZE_M 128
 #define BLOCK_SIZE_N 64
 #define BLOCK_SIZE_K 16
 #define THREAD_SIZE_Y 8
