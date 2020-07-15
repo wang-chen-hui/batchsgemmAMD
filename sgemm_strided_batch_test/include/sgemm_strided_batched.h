@@ -69,8 +69,8 @@ __global__ void ReferenceGemm_kernel(
 
     // shared memory
 
-    __shared__ float As[BLOCK_SIZE_M][BLOCK_SIZE_K]; // avoid bank conflict
-    __shared__ float Bs[BLOCK_SIZE_K][BLOCK_SIZE_N];
+    __shared__ float As[BLOCK_SIZE_M * 2][BLOCK_SIZE_K]; // avoid bank conflict
+    __shared__ float Bs[BLOCK_SIZE_K * 2][BLOCK_SIZE_N];
     
     // registers for C
     float accum[THREAD_SIZE_Y][THREAD_SIZE_X] = {0};
@@ -80,41 +80,47 @@ __global__ void ReferenceGemm_kernel(
     
     // threads needed to load one row of tile
     // / 4 is because float4 is used
-    const int A_TILE_THREAD_PER_ROW = BLOCK_SIZE_K / 4;
+    const int A_TILE_THREAD_PER_ROW = BLOCK_SIZE_K / 1;
     const int B_TILE_THREAD_PER_ROW = BLOCK_SIZE_N / 4;
     
     // row number and col number that needs to be loaded by this thread
     const int A_TILE_ROW_START = tid / A_TILE_THREAD_PER_ROW;
     const int B_TILE_ROW_START = tid / B_TILE_THREAD_PER_ROW;
 
-    const int A_TILE_COL = tid % A_TILE_THREAD_PER_ROW * 4;
+    const int A_TILE_COL = tid % A_TILE_THREAD_PER_ROW * 1;
     const int B_TILE_COL = tid % B_TILE_THREAD_PER_ROW * 4;
     
     // row stride that thread uses to load multiple rows of a tile
     const int A_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / A_TILE_THREAD_PER_ROW;
     const int B_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / B_TILE_THREAD_PER_ROW;
-    
-    // can not unroll since K can not be determined at this point
-    for (int tile_idx = 0 ; tile_idx < K ; tile_idx += BLOCK_SIZE_K) {
-        // load A from global memory to shared memory
-        #pragma unroll
-        for ( int i = 0 ; i < BLOCK_SIZE_M ; i += A_TILE_ROW_STRIDE) {
-            FETCH_FLOAT4(As[A_TILE_ROW_START + i][A_TILE_COL]) = FETCH_FLOAT4(A[OFFSET(
-                    BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
-                    A_TILE_COL + tile_idx, // col
-                    K )]);
-        }
 
-        // load B from global memory to shared memory
-        #pragma unroll
-        for ( int i = 0 ; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE) {
-            FETCH_FLOAT4(Bs[B_TILE_ROW_START + i][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
-                    tile_idx + B_TILE_ROW_START + i, // row
-                    B_TILE_COL + BLOCK_SIZE_N * bx, // col
-                    N )]);
-        }
+
+    // load A from global memory to shared memory
+    #pragma unroll
+    for ( int i = 0 ; i < BLOCK_SIZE_M ; i += A_TILE_ROW_STRIDE) {
+        (As[A_TILE_ROW_START + i][A_TILE_COL]) = (A[OFFSET(
+                BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+                A_TILE_COL, // col
+                K )]);
+    }
+
+    // load B from global memory to shared memory
+    #pragma unroll
+    for ( int i = 0 ; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE) {
+        FETCH_FLOAT4(Bs[B_TILE_ROW_START + i][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
+                B_TILE_ROW_START + i, // row
+                B_TILE_COL + BLOCK_SIZE_N * bx, // col
+                N )]);
+    }
     
         __syncthreads();
+    // can not unroll since K can not be determined at this point
+    for (int tile_idx = BLOCK_SIZE_K; tile_idx < K ; tile_idx += BLOCK_SIZE_K) {
+
+
+        int tile_id = tile_idx / BLOCK_SIZE_K;
+
+
 
         // compute c
         #pragma unroll
@@ -122,13 +128,13 @@ __global__ void ReferenceGemm_kernel(
             // load A from shared memory to register
             #pragma unroll
             for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y) {
-                frag_a[thread_y] = As[ty * THREAD_SIZE_Y + thread_y][k];
+                frag_a[thread_y] = As[ty * THREAD_SIZE_Y + thread_y + (tile_id - 1) % 2 * BLOCK_SIZE_M][k];
             }
 
             // load B from shared memory to register
             #pragma unroll
             for (int thread_x = 0; thread_x < THREAD_SIZE_X; thread_x += 4) {
-                FETCH_FLOAT4(frag_b[thread_x]) = FETCH_FLOAT4(Bs[k][THREAD_SIZE_X * tx + thread_x]);
+                FETCH_FLOAT4(frag_b[thread_x]) = FETCH_FLOAT4(Bs[k + (tile_id - 1) % 2 * BLOCK_SIZE_K][THREAD_SIZE_X * tx + thread_x]);
             }
             
             #pragma unroll
@@ -140,7 +146,55 @@ __global__ void ReferenceGemm_kernel(
             }
             
         }
+
+        // load A from global memory to shared memory
+        #pragma unroll
+        for ( int i = 0 ; i < BLOCK_SIZE_M ; i += A_TILE_ROW_STRIDE) {
+            (As[A_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_M][A_TILE_COL]) = (A[OFFSET(
+                    BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+                    A_TILE_COL + tile_idx, // col
+                    K )]);
+        }
+
+        // load B from global memory to shared memory
+        #pragma unroll
+        for ( int i = 0 ; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE) {
+            FETCH_FLOAT4(Bs[B_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_K][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
+                    tile_idx + B_TILE_ROW_START + i, // row
+                    B_TILE_COL + BLOCK_SIZE_N * bx, // col
+                    N )]);
+        }
+    
+
         __syncthreads();
+    }
+
+
+
+    int tile_id = K / BLOCK_SIZE_K;
+    // compute c
+    #pragma unroll
+    for (int k = 0; k < BLOCK_SIZE_K; ++ k) {
+        // load A from shared memory to register
+        #pragma unroll
+        for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y) {
+            frag_a[thread_y] = As[ty * THREAD_SIZE_Y + thread_y + (tile_id - 1) % 2 * BLOCK_SIZE_M][k];
+        }
+
+        // load B from shared memory to register
+        #pragma unroll
+        for (int thread_x = 0; thread_x < THREAD_SIZE_X; thread_x += 4) {
+            FETCH_FLOAT4(frag_b[thread_x]) = FETCH_FLOAT4(Bs[k + (tile_id - 1) % 2 * BLOCK_SIZE_K][THREAD_SIZE_X * tx + thread_x]);
+        }
+        
+        #pragma unroll
+        for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y) {
+            #pragma unroll
+            for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x) {
+                accum[thread_y][thread_x] += frag_a[thread_y] * frag_b[thread_x];
+            }
+        }
+        
     }
 
     // store back to C
@@ -160,8 +214,6 @@ __global__ void ReferenceGemm_kernel(
         }
     }
 }
-
-
 
 void sgemm_strided_batched2(sgemm_operation trans_a,
                            sgemm_operation trans_b,
