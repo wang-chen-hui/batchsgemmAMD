@@ -2,12 +2,12 @@
 INC_PATH = -I. -I./include
 LIB_PATH = lib/libcheckresult.so lib/libsgemm_strided_batched.so -lcrypto
 #LIB_PATH = -L./lib -lcheckresult -lcrypto
-ADD_FLAG = -w -lcudart	
+ADD_FLAG = -w -lcudart	-O3
 
 all: example_sgemm_strided_batched.o
 		nvcc $^ ${INC_PATH} ${ADD_FLAG} ${LIB_PATH} -o example_sgemm_strided_batched
-example_sgemm_strided_batched.o: example_sgemm_strided_batched.cu
-		nvcc -c $< ${INC_PATH} ${ADD_FLAG} -o $@
+example_sgemm_strided_batched.o: example_sgemm_strided_batched.cu ./include/*.h
+		nvcc -c $< ${ADD_FLAG} -o $@
 
 clean:
 		rm -rf *.o

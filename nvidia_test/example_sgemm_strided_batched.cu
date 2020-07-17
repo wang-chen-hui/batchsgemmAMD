@@ -47,8 +47,8 @@ using std::vector;
 #define DIM2 128
 #define DIM3 129
 #define BATCH_COUNT 10
-#define ALPHA 2
-#define BETA 3
+#define ALPHA 1
+#define BETA 0
 
 void printMatrix(const char* name,vector<float> A, int m, int n, int lda)
 {
@@ -321,17 +321,17 @@ void initialize_a_b_c(vector<float>& ha,
     srand(size_a);
     for(int i = 0; i < size_a; ++i)
     {
-        ha[i] = rand() % 17;
+        ha[i] = i;//rand() % 17;
        //      ha[i] = i;
     }
     for(int i = 0; i < size_b; ++i)
     {
-        hb[i] = rand() % 5;
+        hb[i] = 2;//rand() % 5;
         //      hb[i] = 1.0;
     }
     for(int i = 0; i < size_c; ++i)
     {
-        hc[i] = rand() % 3;
+        hc[i] = 0;//rand() % 3;
         //      hc[i] = 1.0;
     }
     hc_gold = hc;
@@ -568,9 +568,9 @@ int main(int argc, char* argv[])
     }
 
 
-    std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
-              << stride_a << ", " << stride_b << ", " << stride_c << ", " << batch_count << ", "
-              << alpha << ", " << beta << ", ";
+    // std::cout << m << ", " << n << ", " << k << ", " << lda << ", " << ldb << ", " << ldc << ", "
+    //           << stride_a << ", " << stride_b << ", " << stride_c << ", " << batch_count << ", "
+    //           << alpha << ", " << beta << ", ";
 
     int size_a = batch_count == 0 ? size_a1 : size_a1 + stride_a * (batch_count - 1);
     int size_b = batch_count == 0 ? size_b1 : size_b1 + stride_b * (batch_count - 1);
@@ -591,10 +591,11 @@ int main(int argc, char* argv[])
     initialize_a_b_c(ha, size_a, hb, size_b, hc, hc_gold, size_c);	
 
     // allocate memory on device
-    float *da, *db, *dc;
+    float *da, *db, *dc, *dcc;
     CHECK_HIP_ERROR(cudaMalloc(&da, size_a * sizeof(float)));
     CHECK_HIP_ERROR(cudaMalloc(&db, size_b * sizeof(float)));
     CHECK_HIP_ERROR(cudaMalloc(&dc, size_c * sizeof(float)));
+    CHECK_HIP_ERROR(cudaMalloc(&dcc, size_c * sizeof(float)));
 
     // copy matrices from host to device
     CHECK_HIP_ERROR(cudaMemcpy(da, ha.data(), sizeof(float) * size_a, cudaMemcpyHostToDevice));
@@ -604,8 +605,7 @@ int main(int argc, char* argv[])
     printMatrix("B",hb,k,n,ldb);
     printMatrix("C",hc,m,n,ldc);
 	double time=0.0;
-    cudaEventRecord(start,0);
-
+    for(int s1 = 0; s1 < 1; ++s1)
     sgemm_strided_batched(trans_a,
                           trans_b,
                           m,
@@ -623,19 +623,41 @@ int main(int argc, char* argv[])
                           ldc,
                           stride_c,
                           batch_count);
+    cudaEventRecord(start,0);
+
+    for(int s1 = 0; s1 < 100; ++s1)
+    sgemm_strided_batched(trans_a,
+                          trans_b,
+                          m,
+                          n,
+                          k,
+                          &alpha,
+                          da,
+                          lda,
+                          stride_a,
+                          db,
+                          ldb,
+                          stride_b,
+                          &beta,
+                          dcc,
+                          ldc,
+                          stride_c,
+                          batch_count);
 
 	cudaEventRecord(end,0);
 	cudaEventSynchronize(end);
 	float elapsed;
 	cudaEventElapsedTime(&elapsed,start,end);
 	time += elapsed;
-
+    time /= 100;
     // copy output from device to CPU
     CHECK_HIP_ERROR(cudaMemcpy(hc.data(), dc, sizeof(float) * size_c, cudaMemcpyDeviceToHost));
     printMatrix("C",hc,m,n,ldc);
+
     bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
+    printMatrix("C_gold", hc_gold, m,n, ldc);
 	std::ostringstream out;
-	if ( result == 1 )
+	// if ( result == 1 )
 	{	
         out.precision(std::numeric_limits<double>::digits10);
         out << time;
@@ -654,8 +676,9 @@ int main(int argc, char* argv[])
         cout << "The result is  " << "\n" << chartohexstring << endl;
 		
 	}
-	else
-		std::cout << "Sorry,the result invaild" << std::endl;
+    // else
+    if ( result == 0 )
+		 std::cout << "Sorry,the result invaild" << std::endl;
 	
     CHECK_HIP_ERROR(cudaFree(da));
     CHECK_HIP_ERROR(cudaFree(db));
