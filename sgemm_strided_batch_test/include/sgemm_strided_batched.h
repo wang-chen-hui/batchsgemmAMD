@@ -143,10 +143,12 @@ inline __device__ void global_to_shared_fetch(
     float Bs[BLOCK_SIZE_K * 2][BLOCK_SIZE_N],
     float *A,
     float *B,
-    int K,
-    int N,
-    int by,
-    int bx,
+    const int K,
+    const int N,
+    const int by,
+    const int bx,
+    const int tile_id,
+    const int tile_idx,
     const int THREAD_NUM_PER_BLOCK,
     const int A_TILE_THREAD_PER_ROW,
     const int B_TILE_THREAD_PER_ROW,
@@ -179,9 +181,9 @@ inline __device__ void global_to_shared_fetch(
 #pragma unroll
     for (int i = 0; i < BLOCK_SIZE_M; i += A_TILE_ROW_STRIDE)
     {
-        (As[A_TILE_ROW_START + i][A_TILE_COL]) =(A[OFFSET(
+        (As[A_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_M][A_TILE_COL]) =(A[OFFSET(
             BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
-            A_TILE_COL,                    // col
+            A_TILE_COL + tile_idx,                    // col
             K)]);
     }
 
@@ -189,8 +191,8 @@ inline __device__ void global_to_shared_fetch(
 #pragma unroll
     for (int i = 0; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE)
     {
-        FETCH_FLOAT4(Bs[B_TILE_ROW_START + i][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
-            B_TILE_ROW_START + i, // row
+        FETCH_FLOAT4(Bs[B_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_K][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
+            B_TILE_ROW_START + i + tile_idx, // row
             B_TILE_COL + BLOCK_SIZE_N * bx,  // col
             N)]);
     }
@@ -341,7 +343,7 @@ __global__ void ReferenceGemm_kernel(
     //             N )]);
     // }
     
-    global_to_shared_fetch(As, Bs, A, B, K, N, by, bx,
+    global_to_shared_fetch(As, Bs, A, B, K, N, by, bx, 0, 0,
     THREAD_NUM_PER_BLOCK,
     A_TILE_THREAD_PER_ROW,
     B_TILE_THREAD_PER_ROW,
@@ -387,23 +389,36 @@ __global__ void ReferenceGemm_kernel(
             
         }
 
-        // load A from global memory to shared memory
-        #pragma unroll
-        for ( int i = 0 ; i < BLOCK_SIZE_M ; i += A_TILE_ROW_STRIDE) {
-            (As[A_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_M][A_TILE_COL]) = (A[OFFSET(
-                    BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
-                    A_TILE_COL + tile_idx, // col
-                    K )]);
-        }
 
-        // load B from global memory to shared memory
-        #pragma unroll
-        for ( int i = 0 ; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE) {
-            FETCH_FLOAT4(Bs[B_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_K][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
-                    tile_idx + B_TILE_ROW_START + i, // row
-                    B_TILE_COL + BLOCK_SIZE_N * bx, // col
-                    N )]);
-        }
+        global_to_shared_fetch(As, Bs, A, B, K, N, by, bx, tile_id, tile_idx,
+        THREAD_NUM_PER_BLOCK,
+        A_TILE_THREAD_PER_ROW,
+        B_TILE_THREAD_PER_ROW,
+        A_TILE_ROW_START,
+        B_TILE_ROW_START,
+        A_TILE_COL,
+        B_TILE_COL,
+        A_TILE_ROW_STRIDE,
+        B_TILE_ROW_STRIDE
+        );
+
+        // // load A from global memory to shared memory
+        // #pragma unroll
+        // for ( int i = 0 ; i < BLOCK_SIZE_M ; i += A_TILE_ROW_STRIDE) {
+        //     (As[A_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_M][A_TILE_COL]) = (A[OFFSET(
+        //             BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+        //             A_TILE_COL + tile_idx, // col
+        //             K )]);
+        // }
+
+        // // load B from global memory to shared memory
+        // #pragma unroll
+        // for ( int i = 0 ; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE) {
+        //     FETCH_FLOAT4(Bs[B_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_K][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
+        //             tile_idx + B_TILE_ROW_START + i, // row
+        //             B_TILE_COL + BLOCK_SIZE_N * bx, // col
+        //             N )]);
+        // }
     
 
         __syncthreads();
