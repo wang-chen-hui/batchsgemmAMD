@@ -30,6 +30,172 @@ typedef enum sgemm_operation_
 // transfer float4
 #define FETCH_FLOAT4(pointer) (reinterpret_cast<float4*>(&(pointer))[0])
 
+
+inline __device__ void global_to_shared_request(
+    float *frag_a,
+    float *frag_b,
+    float *A,
+    float *B,
+    int K,
+    int N,
+    int by,
+    int bx,
+    int tile_idx,
+    const int THREAD_NUM_PER_BLOCK,
+    const int A_TILE_THREAD_PER_ROW,
+    const int B_TILE_THREAD_PER_ROW,
+    const int A_TILE_ROW_START,
+    const int B_TILE_ROW_START,
+    const int A_TILE_COL,
+    const int B_TILE_COL,
+    const int A_TILE_ROW_STRIDE,
+    const int B_TILE_ROW_STRIDE)
+{
+    // const int THREAD_NUM_PER_BLOCK = (BLOCK_SIZE_N / THREAD_SIZE_X) * (BLOCK_SIZE_M / THREAD_SIZE_Y);
+    // // threads needed to load one row of tile
+    // // / 4 is because float4 is used
+    // const int A_TILE_THREAD_PER_ROW = BLOCK_SIZE_K / 1;
+    // const int B_TILE_THREAD_PER_ROW = BLOCK_SIZE_N / 4;
+
+    // // row number and col number that needs to be loaded by this thread
+    // const int A_TILE_ROW_START = tid / A_TILE_THREAD_PER_ROW;
+    // const int B_TILE_ROW_START = tid / B_TILE_THREAD_PER_ROW;
+
+    // const int A_TILE_COL = tid % A_TILE_THREAD_PER_ROW * 1;
+    // const int B_TILE_COL = tid % B_TILE_THREAD_PER_ROW * 4;
+
+    // // row stride that thread uses to load multiple rows of a tile
+    // const int A_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / A_TILE_THREAD_PER_ROW;
+    // const int B_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / B_TILE_THREAD_PER_ROW;
+
+    // load A from global memory to shared memory
+#pragma unroll
+    for (int i = 0; i < BLOCK_SIZE_M; i += A_TILE_ROW_STRIDE)
+    {
+        (frag_a[i / A_TILE_ROW_STRIDE * 1]) = (A[OFFSET(
+            BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+            A_TILE_COL + tile_idx,                    // col
+            K)]);
+    }
+// load B from global memory to shared memory
+#pragma unroll
+    for (int i = 0; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE)
+    {
+        FETCH_FLOAT4(frag_b[i / B_TILE_ROW_STRIDE * 4]) = FETCH_FLOAT4(B[OFFSET(
+            B_TILE_ROW_START + i + tile_idx, // row
+            B_TILE_COL + BLOCK_SIZE_N * bx,  // col
+            N)]);
+    }
+}
+
+inline __device__ void global_to_shared_commit(
+    float As[BLOCK_SIZE_M * 2][BLOCK_SIZE_K],
+    float Bs[BLOCK_SIZE_K * 2][BLOCK_SIZE_N],
+    float *frag_a,
+    float *frag_b,
+    int tile_id,
+    const int THREAD_NUM_PER_BLOCK,
+    const int A_TILE_THREAD_PER_ROW,
+    const int B_TILE_THREAD_PER_ROW,
+    const int A_TILE_ROW_START,
+    const int B_TILE_ROW_START,
+    const int A_TILE_COL,
+    const int B_TILE_COL,
+    const int A_TILE_ROW_STRIDE,
+    const int B_TILE_ROW_STRIDE
+    )
+{
+    // const int THREAD_NUM_PER_BLOCK = (BLOCK_SIZE_N / THREAD_SIZE_X) * (BLOCK_SIZE_M / THREAD_SIZE_Y);
+    // // threads needed to load one row of tile
+    // // / 4 is because float4 is used
+    // const int A_TILE_THREAD_PER_ROW = BLOCK_SIZE_K / 1;
+    // const int B_TILE_THREAD_PER_ROW = BLOCK_SIZE_N / 4;
+
+    // // row number and col number that needs to be loaded by this thread
+    // const int A_TILE_ROW_START = tid / A_TILE_THREAD_PER_ROW;
+    // const int B_TILE_ROW_START = tid / B_TILE_THREAD_PER_ROW;
+
+    // const int A_TILE_COL = tid % A_TILE_THREAD_PER_ROW * 1;
+    // const int B_TILE_COL = tid % B_TILE_THREAD_PER_ROW * 4;
+
+    // // row stride that thread uses to load multiple rows of a tile
+    // const int A_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / A_TILE_THREAD_PER_ROW;
+    // const int B_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / B_TILE_THREAD_PER_ROW;
+
+    // load A from global memory to shared memory
+#pragma unroll
+    for (int i = 0; i < BLOCK_SIZE_M; i += A_TILE_ROW_STRIDE)
+    {
+        (As[A_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_M][A_TILE_COL]) = (frag_a[i / A_TILE_ROW_STRIDE * 1]);
+    }
+
+// load B from global memory to shared memory
+#pragma unroll
+    for (int i = 0; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE)
+    {
+        FETCH_FLOAT4(Bs[B_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_K][B_TILE_COL]) = FETCH_FLOAT4(frag_b[i / B_TILE_ROW_STRIDE * 4]);
+    }
+}
+
+
+inline __device__ void global_to_shared_fetch(
+    float As[BLOCK_SIZE_M * 2][BLOCK_SIZE_K],
+    float Bs[BLOCK_SIZE_K * 2][BLOCK_SIZE_N],
+    float *A,
+    float *B,
+    int K,
+    int N,
+    int by,
+    int bx,
+    const int THREAD_NUM_PER_BLOCK,
+    const int A_TILE_THREAD_PER_ROW,
+    const int B_TILE_THREAD_PER_ROW,
+    const int A_TILE_ROW_START,
+    const int B_TILE_ROW_START,
+    const int A_TILE_COL,
+    const int B_TILE_COL,
+    const int A_TILE_ROW_STRIDE,
+    const int B_TILE_ROW_STRIDE
+    )
+{
+    // const int THREAD_NUM_PER_BLOCK = (BLOCK_SIZE_N / THREAD_SIZE_X) * (BLOCK_SIZE_M / THREAD_SIZE_Y);
+    // // threads needed to load one row of tile
+    // // / 4 is because float4 is used
+    // const int A_TILE_THREAD_PER_ROW = BLOCK_SIZE_K / 1;
+    // const int B_TILE_THREAD_PER_ROW = BLOCK_SIZE_N / 4;
+
+    // // row number and col number that needs to be loaded by this thread
+    // const int A_TILE_ROW_START = tid / A_TILE_THREAD_PER_ROW;
+    // const int B_TILE_ROW_START = tid / B_TILE_THREAD_PER_ROW;
+
+    // const int A_TILE_COL = tid % A_TILE_THREAD_PER_ROW * 1;
+    // const int B_TILE_COL = tid % B_TILE_THREAD_PER_ROW * 4;
+
+    // // row stride that thread uses to load multiple rows of a tile
+    // const int A_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / A_TILE_THREAD_PER_ROW;
+    // const int B_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / B_TILE_THREAD_PER_ROW;
+
+    // load A from global memory to shared memory
+#pragma unroll
+    for (int i = 0; i < BLOCK_SIZE_M; i += A_TILE_ROW_STRIDE)
+    {
+        (As[A_TILE_ROW_START + i][A_TILE_COL]) =(A[OFFSET(
+            BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+            A_TILE_COL,                    // col
+            K)]);
+    }
+
+// load B from global memory to shared memory
+#pragma unroll
+    for (int i = 0; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE)
+    {
+        FETCH_FLOAT4(Bs[B_TILE_ROW_START + i][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
+            B_TILE_ROW_START + i, // row
+            B_TILE_COL + BLOCK_SIZE_N * bx,  // col
+            N)]);
+    }
+}
+
 __global__ void ReferenceGemm_kernel( 
     int M,
     int N,
@@ -69,7 +235,7 @@ __global__ void ReferenceGemm_kernel(
 
     // shared memory
 
-    __shared__ float As[BLOCK_SIZE_M * 2][BLOCK_SIZE_K]; // avoid bank conflict
+    __shared__ float As[BLOCK_SIZE_M * 2][BLOCK_SIZE_K];
     __shared__ float Bs[BLOCK_SIZE_K * 2][BLOCK_SIZE_N];
     
     // registers for C
@@ -95,25 +261,99 @@ __global__ void ReferenceGemm_kernel(
     const int B_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / B_TILE_THREAD_PER_ROW;
 
 
-    // load A from global memory to shared memory
-    #pragma unroll
-    for ( int i = 0 ; i < BLOCK_SIZE_M ; i += A_TILE_ROW_STRIDE) {
-        (As[A_TILE_ROW_START + i][A_TILE_COL]) = (A[OFFSET(
-                BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
-                A_TILE_COL, // col
-                K )]);
-    }
-
-    // load B from global memory to shared memory
-    #pragma unroll
-    for ( int i = 0 ; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE) {
-        FETCH_FLOAT4(Bs[B_TILE_ROW_START + i][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
-                B_TILE_ROW_START + i, // row
-                B_TILE_COL + BLOCK_SIZE_N * bx, // col
-                N )]);
-    }
+    float  frag_As[BLOCK_SIZE_M * BLOCK_SIZE_K / THREAD_NUM_PER_BLOCK];
+    float  frag_Bs[BLOCK_SIZE_N * BLOCK_SIZE_K / THREAD_NUM_PER_BLOCK];
     
+    // global_to_shared_request(frag_As, frag_Bs, A, B, K, N, by, bx, 0, 
+    // THREAD_NUM_PER_BLOCK,
+    // A_TILE_THREAD_PER_ROW,
+    // B_TILE_THREAD_PER_ROW,
+    // A_TILE_ROW_START,
+    // B_TILE_ROW_START,
+    // A_TILE_COL,
+    // B_TILE_COL,
+    // A_TILE_ROW_STRIDE,
+    // B_TILE_ROW_STRIDE
+    // );
+
+    // // __syncthreads();
+
+    // global_to_shared_commit(As, Bs, frag_As, frag_Bs, 0, 
+    // THREAD_NUM_PER_BLOCK,
+    // A_TILE_THREAD_PER_ROW,
+    // B_TILE_THREAD_PER_ROW,
+    // A_TILE_ROW_START,
+    // B_TILE_ROW_START,
+    // A_TILE_COL,
+    // B_TILE_COL,
+    // A_TILE_ROW_STRIDE,
+    // B_TILE_ROW_STRIDE
+    // );
+    // __syncthreads();
+
+
+// #pragma unroll
+//     for (int i = 0; i < BLOCK_SIZE_M; i += A_TILE_ROW_STRIDE)
+//     {
+//         (frag_As[i / A_TILE_ROW_STRIDE]) = (A[OFFSET(
+//             BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+//             A_TILE_COL,                    // col
+//             K)]);
+//     }
+// // load B from global memory to shared memory
+// #pragma unroll
+//     for (int i = 0; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE)
+//     {
+//         FETCH_FLOAT4(frag_Bs[i / B_TILE_ROW_STRIDE * 4]) = FETCH_FLOAT4(B[OFFSET(
+//             B_TILE_ROW_START + i, // row
+//             B_TILE_COL + BLOCK_SIZE_N * bx,  // col
+//             N)]);
+//     }
+
+// #pragma unroll
+//     for (int i = 0; i < BLOCK_SIZE_M; i += A_TILE_ROW_STRIDE)
+//     {
+//         (As[A_TILE_ROW_START + i][A_TILE_COL]) = (frag_As[i / A_TILE_ROW_STRIDE]);
+//     }
+
+// // load B from global memory to shared memory
+// #pragma unroll
+//     for (int i = 0; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE)
+//     {
+//         FETCH_FLOAT4(Bs[B_TILE_ROW_START + i][B_TILE_COL]) = FETCH_FLOAT4(frag_Bs[i / B_TILE_ROW_STRIDE * 4]);
+//     }
+
+    // // load A from global memory to shared memory
+    // #pragma unroll
+    // for ( int i = 0 ; i < BLOCK_SIZE_M ; i += A_TILE_ROW_STRIDE) {
+    //     (As[A_TILE_ROW_START + i][A_TILE_COL]) = (A[OFFSET(
+    //             BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+    //             A_TILE_COL, // col
+    //             K )]);
+    // }
+
+    // // load B from global memory to shared memory
+    // #pragma unroll
+    // for ( int i = 0 ; i < BLOCK_SIZE_K; i += B_TILE_ROW_STRIDE) {
+    //     FETCH_FLOAT4(Bs[B_TILE_ROW_START + i][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
+    //             B_TILE_ROW_START + i, // row
+    //             B_TILE_COL + BLOCK_SIZE_N * bx, // col
+    //             N )]);
+    // }
+    
+    global_to_shared_fetch(As, Bs, A, B, K, N, by, bx,
+    THREAD_NUM_PER_BLOCK,
+    A_TILE_THREAD_PER_ROW,
+    B_TILE_THREAD_PER_ROW,
+    A_TILE_ROW_START,
+    B_TILE_ROW_START,
+    A_TILE_COL,
+    B_TILE_COL,
+    A_TILE_ROW_STRIDE,
+    B_TILE_ROW_STRIDE
+    );
         __syncthreads();
+
     // can not unroll since K can not be determined at this point
     for (int tile_idx = BLOCK_SIZE_K; tile_idx < K ; tile_idx += BLOCK_SIZE_K) {
 
