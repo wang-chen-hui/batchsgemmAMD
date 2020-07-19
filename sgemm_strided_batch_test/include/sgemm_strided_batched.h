@@ -99,10 +99,11 @@ inline __device__ void global_to_shared_fetch(
     {
         if (isPadding)
         {
-                (As[A_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_M][A_TILE_COL]) = (A[OFFSET(
-                    BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
-                    A_TILE_COL + tile_idx,                    // col
-                    K)]);
+            // if (BLOCK_SIZE_M * by + A_TILE_ROW_START + i < M && A_TILE_COL + tile_idx < K)
+            (As[A_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_M][A_TILE_COL]) = (A[OFFSET(
+                BLOCK_SIZE_M * by + A_TILE_ROW_START + i, // row
+                A_TILE_COL + tile_idx,                    // col
+                K)]);
         }
         else
         {
@@ -119,10 +120,11 @@ inline __device__ void global_to_shared_fetch(
     {
         if (isPadding)
         {
-                FETCH_FLOAT4(Bs[B_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_K][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
-                    B_TILE_ROW_START + i + tile_idx, // row
-                    B_TILE_COL + BLOCK_SIZE_N * bx,  // col
-                    N)]);
+            // if (B_TILE_ROW_START + i + tile_idx < K && B_TILE_COL + BLOCK_SIZE_N * bx < N + 4)
+            FETCH_FLOAT4(Bs[B_TILE_ROW_START + i + (tile_id % 2) * BLOCK_SIZE_K][B_TILE_COL]) = FETCH_FLOAT4(B[OFFSET(
+                B_TILE_ROW_START + i + tile_idx, // row
+                B_TILE_COL + BLOCK_SIZE_N * bx,  // col
+                N)]);
         }
         else
         {
@@ -175,15 +177,23 @@ inline __device__ void epilogue(
     int tid)
 {
     int idx = 0;
-#pragma unroll
-    for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y)
+    if (isPadding)
     {
 #pragma unroll
-        for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x)
+        for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y)
         {
-            if (isPadding)
+#pragma unroll
+            for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x)
             {
                 if (BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y < M && BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x < N)
+                    // C[OFFSET(
+                    //     BLOCK_SIZE_M * by + ty + thread_y * 16,
+                    //     BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
+                    //     N)] = alpha * accumulators[thread_y][thread_x] + beta *
+                    //                                                          C[OFFSET(
+                    //                                                              BLOCK_SIZE_M * by + ty + thread_y * 16,
+                    //                                                              BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
+                    //                                                              N)];                    
                     C[OFFSET(
                         BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
                         BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
@@ -193,7 +203,16 @@ inline __device__ void epilogue(
                                                                                  BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
                                                                                  N)];
             }
-            else
+        }
+    }
+    else
+    {
+
+#pragma unroll
+        for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y)
+        {
+#pragma unroll
+            for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x)
             {
                 C[OFFSET(
                     BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
@@ -203,19 +222,25 @@ inline __device__ void epilogue(
                                                                              BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
                                                                              BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
                                                                              N)];
-                // Cs[tid / 64][tid % 64] = beta * C[OFFSET(
-                //     BLOCK_SIZE_M * by + tid / 64 + thread_y * 16 + thread_x * 4,
-                //     BLOCK_SIZE_N * bx + tid % 64,
-                //     N)];
-
-                // Cs[tid / 64][tid % 64] += alpha * accumulators[thread_y][thread_x];
-
-                // C[OFFSET(
-                //     BLOCK_SIZE_M * by + tid / 64 + thread_y * 16 + thread_x * 4,
-                //     BLOCK_SIZE_N * bx + tid % 64,
-                //     N)] = Cs[tid / 64][tid % 64];
             }
         }
+
+        // #pragma unroll
+        //         for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y)
+        //         {
+        //             FETCH_FLOAT4(Cs[ty + thread_y * 16][tx * THREAD_SIZE_X]) = FETCH_FLOAT4(C[OFFSET(
+        //                 BLOCK_SIZE_M * by + ty + thread_y * 16,
+        //                 BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X,
+        //                 N)]);
+        // #pragma unroll
+        //             for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x)
+        //                 Cs[ty + thread_y * 16][thread_x] = alpha * accumulators[thread_y][thread_x] + beta * Cs[ty + thread_y * 16][thread_x];
+
+        //             FETCH_FLOAT4(C[OFFSET(
+        //                 BLOCK_SIZE_M * by + ty + thread_y * 16,
+        //                 BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X,
+        //                 N)]) = FETCH_FLOAT4(Cs[ty + thread_y * 16][tx * THREAD_SIZE_X]);
+        //         }
     }
 }
 
@@ -287,7 +312,7 @@ __global__ void ReferenceGemm_kernel(
 
     if (isPadding)
     {
-        if(K % BLOCK_SIZE_K  != 0)
+        if (K % BLOCK_SIZE_K != 0)
         {
             res_size = K % BLOCK_SIZE_K;
             res_tile_id += 1;
