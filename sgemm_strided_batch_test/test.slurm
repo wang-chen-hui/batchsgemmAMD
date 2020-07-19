@@ -10,6 +10,8 @@
 
 export LD_LIBRARY_PATH=./lib:$LD_LIBRARY_PATH
 
+./example_sgemm_strided_batched -m 127 -n 127 -k 130 --batch_count 10
+./example_sgemm_strided_batched -m 129 -n 129 -k 130 --batch_count 10
 ./example_sgemm_strided_batched -m 512 -n 512 -k 256 --batch_count 10
 ./example_sgemm_strided_batched -m 512 -n 512 -k 256 --batch_count 10
 ./example_sgemm_strided_batched -m 512 -n 512 -k 256 --batch_count 10

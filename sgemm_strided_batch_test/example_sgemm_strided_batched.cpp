@@ -661,7 +661,7 @@ HIP_END_MARKER();
     
     bool result = check_result(ha,hb,hc,hc_gold,alpha,beta,m,n,k,batch_count,stride_a,a_stride_1,a_stride_2,stride_b,b_stride_1,b_stride_2,stride_c,ldc,size_c);
     std::ostringstream out;
-    if ( result == 1 )
+    
     {	
         out.precision(std::numeric_limits<double>::digits10);
         out << time;
@@ -680,7 +680,7 @@ HIP_END_MARKER();
         cout << "The result is  " << "\n" << chartohexstring << endl;
 		
     }
-    else
+   if ( result == 0 )
         std::cout << "Sorry,the result invaild" << std::endl;
 	
     CHECK_HIP_ERROR(hipFree(da));
