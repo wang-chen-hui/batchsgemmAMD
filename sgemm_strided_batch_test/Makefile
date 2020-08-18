@@ -1,6 +1,6 @@
 INC_PATH = -I. -I/opt/rocm/hip/include -I./include
 LIB_PATH = ./lib/libcheckresult.so -lcrypto
-ADD_FLAG = -w -O2
+ADD_FLAG = -w -O2 -DNDEBUG -DUSE_DEFAULT_STDLIB -O2 
 
 all: example_sgemm_strided_batched.o
 		/opt/rocm/hip/bin/hipcc $^ ${INC_PATH} ${ADD_FLAG} ${LIB_PATH} -o example_sgemm_strided_batched

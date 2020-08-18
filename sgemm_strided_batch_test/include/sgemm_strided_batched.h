@@ -8,11 +8,11 @@
 #include <time.h>
 using namespace std;
 
-#define BLOCK_SIZE_M 128
-#define BLOCK_SIZE_N 64
-#define BLOCK_SIZE_K 16
-#define THREAD_SIZE_Y 8
-#define THREAD_SIZE_X 4
+#define BLOCK_SIZE_M_ 128
+#define BLOCK_SIZE_N_ 64
+#define BLOCK_SIZE_K_ 16
+#define THREAD_SIZE_Y_ 8
+#define THREAD_SIZE_X_ 4
 
 typedef enum sgemm_operation_
 {
@@ -28,32 +28,33 @@ typedef enum sgemm_operation_
 // transfer float4
 #define FETCH_FLOAT4(pointer) (reinterpret_cast<float4 *>(&(pointer))[0])
 
-inline __device__ static void mad(
-    float &d,
-    const float &a,
-    const float &b,
-    const float &c)
-{
-    d = a * b + c;
-    // asm volatile("fma.rn.f32 %0, %1, %2, %3;\n"
-    //              : "=f"(d)
-    //              : "f"(a), "f"(b), "f"(c));
-}
+// inline __device__ static void mad(
+//     float &d,
+//     const float &a,
+//     const float &b,
+//     const float &c)
+// {
+//     d = a * b + c;
+//     // asm volatile("fma.rn.f32 %0, %1, %2, %3;\n"
+//     //              : "=f"(d)
+//     //              : "f"(a), "f"(b), "f"(c));
+// }
 
-inline __device__ void mad_xy(
-    float (&accumulators)[THREAD_SIZE_Y][THREAD_SIZE_X],
-    float (&tile_a)[THREAD_SIZE_Y],
-    float (&tile_b)[THREAD_SIZE_X],
-    int x,
-    int y)
-{
-    mad(
-        accumulators[y][x],
-        tile_a[y],
-        tile_b[x],
-        accumulators[y][x]);
-}
+// inline __device__ void mad_xy(
+//     float (&accumulators)[THREAD_SIZE_Y][THREAD_SIZE_X],
+//     float (&tile_a)[THREAD_SIZE_Y],
+//     float (&tile_b)[THREAD_SIZE_X],
+//     int x,
+//     int y)
+// {
+//     mad(
+//         accumulators[y][x],
+//         tile_a[y],
+//         tile_b[x],
+//         accumulators[y][x]);
+// }
 
+template<int THREAD_SIZE_Y, int THREAD_SIZE_X>
 inline __device__ void multiply_accumulate(
     float (&accumulators)[THREAD_SIZE_Y][THREAD_SIZE_X],
     float (&tile_a)[THREAD_SIZE_Y],
@@ -70,7 +71,18 @@ inline __device__ void multiply_accumulate(
     }
 }
 
-template <bool isPadding>
+template <bool isPadding,
+    int BLOCK_SIZE_M,
+    int BLOCK_SIZE_N,
+    int BLOCK_SIZE_K,
+    int THREAD_SIZE_Y,
+    int THREAD_SIZE_X,
+    int THREAD_NUM_PER_BLOCK,
+    int A_TILE_THREAD_PER_ROW,
+    int B_TILE_THREAD_PER_ROW,
+    int A_TILE_ROW_STRIDE,
+    int B_TILE_ROW_STRIDE
+>
 inline __device__ void global_to_shared_fetch(
     float As[BLOCK_SIZE_M * 2][BLOCK_SIZE_K],
     float Bs[BLOCK_SIZE_K * 2][BLOCK_SIZE_N],
@@ -83,15 +95,10 @@ inline __device__ void global_to_shared_fetch(
     const int bx,
     const int tile_id,
     const int tile_idx,
-    const int THREAD_NUM_PER_BLOCK,
-    const int A_TILE_THREAD_PER_ROW,
-    const int B_TILE_THREAD_PER_ROW,
     const int A_TILE_ROW_START,
     const int B_TILE_ROW_START,
     const int A_TILE_COL,
-    const int B_TILE_COL,
-    const int A_TILE_ROW_STRIDE,
-    const int B_TILE_ROW_STRIDE)
+    const int B_TILE_COL)
 {
     // load A from global memory to shared memory
 #pragma unroll
@@ -136,6 +143,13 @@ inline __device__ void global_to_shared_fetch(
     }
 }
 
+template <
+    int BLOCK_SIZE_M,
+    int BLOCK_SIZE_N,
+    int BLOCK_SIZE_K,
+    int THREAD_SIZE_Y,
+    int THREAD_SIZE_X
+>
 inline __device__ void shared_to_register_fetch(
     float frag_a[THREAD_SIZE_Y],
     float frag_b[THREAD_SIZE_X],
@@ -150,7 +164,6 @@ inline __device__ void shared_to_register_fetch(
     for (int thread_y = 0; thread_y < THREAD_SIZE_Y; thread_y += 1)
     {
         (frag_a[thread_y]) = (As[ty * THREAD_SIZE_Y + thread_y + tidx * BLOCK_SIZE_M][kidx]);
-        // (frag_a[thread_y]) = (As[ty + thread_y * 16 + tidx * BLOCK_SIZE_M][kidx]);
     }
 
 #pragma unroll
@@ -160,7 +173,13 @@ inline __device__ void shared_to_register_fetch(
     }
 }
 
-template <bool isPadding>
+template <bool isPadding,
+    int BLOCK_SIZE_M,
+    int BLOCK_SIZE_N,
+    int BLOCK_SIZE_K,
+    int THREAD_SIZE_Y,
+    int THREAD_SIZE_X
+>
 inline __device__ void epilogue(
     float *C,
     float (&accumulators)[THREAD_SIZE_Y][THREAD_SIZE_X],
@@ -186,65 +205,46 @@ inline __device__ void epilogue(
             for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x)
             {
                 if (BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y < M && BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x < N)
-                    // C[OFFSET(
-                    //     BLOCK_SIZE_M * by + ty + thread_y * 16,
-                    //     BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
-                    //     N)] = alpha * accumulators[thread_y][thread_x] + beta *
-                    //                                                          C[OFFSET(
-                    //                                                              BLOCK_SIZE_M * by + ty + thread_y * 16,
-                    //                                                              BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
-                    //                                                              N)];                    
                     C[OFFSET(
                         BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
                         BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
                         N)] = alpha * accumulators[thread_y][thread_x] + beta *
-                                                                             C[OFFSET(
-                                                                                 BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
-                                                                                 BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
-                                                                                 N)];
+                    C[OFFSET(
+                        BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
+                        BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
+                        N)];
             }
         }
     }
     else
-    {
-
+    {        
 #pragma unroll
         for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y)
         {
 #pragma unroll
             for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x)
             {
-                C[OFFSET(
-                    BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
-                    BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
-                    N)] = alpha * accumulators[thread_y][thread_x] + beta *
-                                                                         C[OFFSET(
-                                                                             BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
-                                                                             BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
-                                                                             N)];
+                    C[OFFSET(
+                        BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
+                        BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
+                        N)] = alpha * accumulators[thread_y][thread_x] + beta *
+                    C[OFFSET(
+                        BLOCK_SIZE_M * by + ty * THREAD_SIZE_Y + thread_y,
+                        BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X + thread_x,
+                        N)];
             }
         }
 
-        // #pragma unroll
-        //         for (int thread_y = 0; thread_y < THREAD_SIZE_Y; ++thread_y)
-        //         {
-        //             FETCH_FLOAT4(Cs[ty + thread_y * 16][tx * THREAD_SIZE_X]) = FETCH_FLOAT4(C[OFFSET(
-        //                 BLOCK_SIZE_M * by + ty + thread_y * 16,
-        //                 BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X,
-        //                 N)]);
-        // #pragma unroll
-        //             for (int thread_x = 0; thread_x < THREAD_SIZE_X; ++thread_x)
-        //                 Cs[ty + thread_y * 16][thread_x] = alpha * accumulators[thread_y][thread_x] + beta * Cs[ty + thread_y * 16][thread_x];
-
-        //             FETCH_FLOAT4(C[OFFSET(
-        //                 BLOCK_SIZE_M * by + ty + thread_y * 16,
-        //                 BLOCK_SIZE_N * bx + tx * THREAD_SIZE_X,
-        //                 N)]) = FETCH_FLOAT4(Cs[ty + thread_y * 16][tx * THREAD_SIZE_X]);
-        //         }
     }
 }
 
-template <bool isPadding>
+template <bool isPadding,
+    int BLOCK_SIZE_M,
+    int BLOCK_SIZE_N,
+    int BLOCK_SIZE_K,
+    int THREAD_SIZE_Y,
+    int THREAD_SIZE_X
+>
 __global__ void ReferenceGemm_kernel(
     int M,
     int N,
@@ -261,7 +261,6 @@ __global__ void ReferenceGemm_kernel(
     int ldc,
     int stride_c)
 {
-
     int batch_id = hipBlockIdx_z;
     A += stride_a * batch_id;
     B += stride_b * batch_id;
@@ -304,9 +303,6 @@ __global__ void ReferenceGemm_kernel(
     const int A_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / A_TILE_THREAD_PER_ROW;
     const int B_TILE_ROW_STRIDE = THREAD_NUM_PER_BLOCK / B_TILE_THREAD_PER_ROW;
 
-    // float frag_As[BLOCK_SIZE_M * BLOCK_SIZE_K / THREAD_NUM_PER_BLOCK];
-    // float frag_Bs[BLOCK_SIZE_N * BLOCK_SIZE_K / THREAD_NUM_PER_BLOCK];
-
     int res_size = BLOCK_SIZE_K;
     int res_tile_id = K / BLOCK_SIZE_K - 1;
 
@@ -319,16 +315,23 @@ __global__ void ReferenceGemm_kernel(
         }
     }
 
-    global_to_shared_fetch<isPadding>(As, Bs, A, B, M, N, K, by, bx, 0, 0,
-                                      THREAD_NUM_PER_BLOCK,
-                                      A_TILE_THREAD_PER_ROW,
-                                      B_TILE_THREAD_PER_ROW,
+    global_to_shared_fetch<
+        isPadding,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        BLOCK_SIZE_K,
+        THREAD_SIZE_Y,
+        THREAD_SIZE_X,
+        THREAD_NUM_PER_BLOCK,
+        A_TILE_THREAD_PER_ROW,
+        B_TILE_THREAD_PER_ROW,
+        A_TILE_ROW_STRIDE,
+        B_TILE_ROW_STRIDE
+    >(As, Bs, A, B, M, N, K, by, bx, 0, 0,
                                       A_TILE_ROW_START,
                                       B_TILE_ROW_START,
                                       A_TILE_COL,
-                                      B_TILE_COL,
-                                      A_TILE_ROW_STRIDE,
-                                      B_TILE_ROW_STRIDE);
+                                      B_TILE_COL);
     __syncthreads();
 
     for (int tile_idx = BLOCK_SIZE_K; tile_idx < K; tile_idx += BLOCK_SIZE_K)
@@ -339,21 +342,32 @@ __global__ void ReferenceGemm_kernel(
         for (int k = 0; k < BLOCK_SIZE_K; ++k)
         {
 
-            shared_to_register_fetch(frag_a, frag_b, As, Bs, k, tile_id % 2, ty, tx);
+            shared_to_register_fetch<
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            BLOCK_SIZE_K,
+            THREAD_SIZE_Y,
+            THREAD_SIZE_X>(frag_a, frag_b, As, Bs, k, tile_id % 2, ty, tx);
 
             multiply_accumulate(accum, frag_a, frag_b);
         }
 
-        global_to_shared_fetch<isPadding>(As, Bs, A, B, M, N, K, by, bx, tile_id + 1, tile_idx,
-                                          THREAD_NUM_PER_BLOCK,
-                                          A_TILE_THREAD_PER_ROW,
-                                          B_TILE_THREAD_PER_ROW,
-                                          A_TILE_ROW_START,
-                                          B_TILE_ROW_START,
-                                          A_TILE_COL,
-                                          B_TILE_COL,
-                                          A_TILE_ROW_STRIDE,
-                                          B_TILE_ROW_STRIDE);
+        global_to_shared_fetch<
+        isPadding,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        BLOCK_SIZE_K,
+        THREAD_SIZE_Y,
+        THREAD_SIZE_X,
+        THREAD_NUM_PER_BLOCK,
+        A_TILE_THREAD_PER_ROW,
+        B_TILE_THREAD_PER_ROW,
+        A_TILE_ROW_STRIDE,
+        B_TILE_ROW_STRIDE>(As, Bs, A, B, M, N, K, by, bx, tile_id + 1, tile_idx,
+                                      A_TILE_ROW_START,
+                                      B_TILE_ROW_START,
+                                      A_TILE_COL,
+                                      B_TILE_COL);
 
         __syncthreads();
     }
@@ -362,12 +376,23 @@ __global__ void ReferenceGemm_kernel(
     for (int k = 0; k < res_size; ++k)
     {
 
-        shared_to_register_fetch(frag_a, frag_b, As, Bs, k, res_tile_id % 2, ty, tx);
+        shared_to_register_fetch<
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            BLOCK_SIZE_K,
+            THREAD_SIZE_Y,
+            THREAD_SIZE_X>(frag_a, frag_b, As, Bs, k, res_tile_id % 2, ty, tx);
 
-        multiply_accumulate(accum, frag_a, frag_b);
+        multiply_accumulate<THREAD_SIZE_Y, THREAD_SIZE_X>(accum, frag_a, frag_b);
     }
 
-    epilogue<isPadding>(C, accum, Bs, M, N, K, alpha, beta, by, bx, ty, tx, tid);
+    epilogue<
+        isPadding,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        BLOCK_SIZE_K,
+        THREAD_SIZE_Y,
+        THREAD_SIZE_X>(C, accum, Bs, M, N, K, alpha, beta, by, bx, ty, tx, tid);
 }
 
 typedef __global__ void (*KERNEL)(
@@ -404,13 +429,25 @@ void sgemm_strided_batched2(sgemm_operation trans_a,
                             int stride_c,
                             int batch_count)
 {
-    dim3 dimBlock(BLOCK_SIZE_N / THREAD_SIZE_X, BLOCK_SIZE_M / THREAD_SIZE_Y);
-    dim3 dimGrid((N + BLOCK_SIZE_N - 1) / BLOCK_SIZE_N, (M + BLOCK_SIZE_M - 1) / BLOCK_SIZE_M, batch_count);
+    dim3 dimBlock(BLOCK_SIZE_N_ / THREAD_SIZE_X_, BLOCK_SIZE_M_ / THREAD_SIZE_Y_);
+    dim3 dimGrid((N + BLOCK_SIZE_N_ - 1) / BLOCK_SIZE_N_, (M + BLOCK_SIZE_M_ - 1) / BLOCK_SIZE_M_, batch_count);
 
-    KERNEL kernel = ReferenceGemm_kernel<true>;
-    if (M % BLOCK_SIZE_M == 0 && N % BLOCK_SIZE_N == 0 && K % BLOCK_SIZE_K == 0)
+    KERNEL kernel = ReferenceGemm_kernel<
+        true,
+        BLOCK_SIZE_M_,
+        BLOCK_SIZE_N_,
+        BLOCK_SIZE_K_,
+        THREAD_SIZE_Y_,
+        THREAD_SIZE_X_>;
+    if (M % BLOCK_SIZE_M_ == 0 && N % BLOCK_SIZE_N_ == 0 && K % BLOCK_SIZE_K_ == 0)
     {
-        kernel = ReferenceGemm_kernel<false>;
+        kernel = ReferenceGemm_kernel<
+        false,
+        BLOCK_SIZE_M_,
+        BLOCK_SIZE_N_,
+        BLOCK_SIZE_K_,
+        THREAD_SIZE_Y_,
+        THREAD_SIZE_X_>;
     }
     hipLaunchKernelGGL(kernel, dimGrid, dimBlock, 0, 0,
                        M,
